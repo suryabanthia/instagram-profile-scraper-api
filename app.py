@@ -1,6 +1,11 @@
 from flask import Flask, jsonify
 import instaloader
 import os
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Initialize Flask app and Instaloader
 app = Flask(__name__)
@@ -10,12 +15,32 @@ L = instaloader.Instaloader()
 INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME")
 INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD")
 
+# Debug route to check environment variables (remove in production)
+@app.route('/debug/env', methods=['GET'])
+def debug_env():
+    return jsonify({
+        'username_set': bool(INSTAGRAM_USERNAME),
+        'password_set': bool(INSTAGRAM_PASSWORD),
+        'username_length': len(INSTAGRAM_USERNAME) if INSTAGRAM_USERNAME else 0,
+        'password_length': len(INSTAGRAM_PASSWORD) if INSTAGRAM_PASSWORD else 0
+    })
+
 # Log in to Instagram if credentials are provided, otherwise proceed without auth
 if INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD:
     try:
+        logger.info(f"Attempting to login with username: {INSTAGRAM_USERNAME}")
         L.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+        logger.info("Login successful!")
+    except instaloader.exceptions.BadCredentialsException:
+        logger.error("Login failed: Bad credentials. Please check your username and password.")
+    except instaloader.exceptions.TwoFactorAuthRequiredException:
+        logger.error("Login failed: Two-factor authentication is required.")
+    except instaloader.exceptions.ConnectionException as e:
+        logger.error(f"Login failed: Connection error - {str(e)}")
     except Exception as e:
-        print(f"Login failed: {str(e)}")
+        logger.error(f"Login failed: Unexpected error - {str(e)}")
+else:
+    logger.warning("No Instagram credentials provided. Running without authentication.")
 
 # Set a User-Agent to mimic a browser
 L.context._session.headers.update({
