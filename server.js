@@ -1,7 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 app.use(express.json());
 
@@ -10,6 +10,11 @@ const INSTAGRAM_API_URL = 'https://www.instagram.com/graphql/query/';
 
 // Query ID for user profile data
 const USER_PROFILE_QUERY_ID = 'c9100bf9110d5eac54a2246af9098ec6';
+
+// Instagram session cookie from environment variable
+if (!process.env.INSTAGRAM_SESSION_ID) {
+  throw new Error('INSTAGRAM_SESSION_ID environment variable is required');
+}
 
 async function scrapeInstagramProfile(username) {
   try {
@@ -32,6 +37,7 @@ async function scrapeInstagramProfile(username) {
         'Origin': 'https://www.instagram.com',
         'Referer': `https://www.instagram.com/${username}/`,
         'Connection': 'keep-alive',
+        'Cookie': `sessionid=${process.env.INSTAGRAM_SESSION_ID};`
       }
     });
 
@@ -94,7 +100,7 @@ async function scrapeInstagramProfile(username) {
       } else if (error.response.status === 429) {
         throw new Error('Rate limit exceeded. Please try again later.');
       } else if (error.response.status === 401) {
-        throw new Error('Authentication required. Please try again later.');
+        throw new Error('Authentication required. Please check your session ID.');
       }
     }
     throw new Error(`Failed to scrape Instagram profile: ${error.message}`);
@@ -113,4 +119,4 @@ app.post('/scrape', async (req, res) => {
   }
 });
 
-app.listen(port, () => console.log(`Server running on http://localhost:${port}`));
+app.listen(port, () => console.log(`Server running on port ${port}`));
