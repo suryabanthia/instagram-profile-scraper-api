@@ -17,11 +17,23 @@ app.use(limiter);
 
 app.use(express.json());
 
-// Instagram GraphQL API endpoint
-const INSTAGRAM_API_URL = 'https://www.instagram.com/graphql/query/';
-
-// Query ID for user profile data
-const USER_PROFILE_QUERY_ID = 'c9100bf9110d5eac54a2246af9098ec6';
+// Instagram API endpoints
+const INSTAGRAM_API_URL = 'https://i.instagram.com/api/v1/users/web_profile_info/';
+const INSTAGRAM_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+  'Accept': '*/*',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'X-IG-App-ID': '936619743392459',
+  'X-ASBD-ID': '198387',
+  'X-IG-WWW-Claim': '0',
+  'Origin': 'https://www.instagram.com',
+  'Connection': 'keep-alive',
+  'Sec-Fetch-Dest': 'empty',
+  'Sec-Fetch-Mode': 'cors',
+  'Sec-Fetch-Site': 'same-origin',
+  'Pragma': 'no-cache',
+  'Cache-Control': 'no-cache'
+};
 
 // Instagram session cookie from environment variable
 if (!process.env.INSTAGRAM_SESSION_ID) {
@@ -35,37 +47,17 @@ function isValidUsername(username) {
 
 async function scrapeInstagramProfile(username) {
   try {
-    // First, get the user ID and data using GraphQL API
-    const userResponse = await axios.get(INSTAGRAM_API_URL, {
-      params: {
-        query_hash: USER_PROFILE_QUERY_ID,
-        variables: JSON.stringify({
-          username: username,
-          first: 12
-        })
-      },
+    // Get user profile data using Instagram's API
+    const userResponse = await axios.get(`${INSTAGRAM_API_URL}?username=${username}`, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': '*/*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'X-IG-App-ID': '936619743392459',
-        'X-ASBD-ID': '198387',
-        'X-IG-WWW-Claim': '0',
-        'Origin': 'https://www.instagram.com',
-        'Referer': `https://www.instagram.com/${username}/`,
-        'Connection': 'keep-alive',
+        ...INSTAGRAM_HEADERS,
         'Cookie': `sessionid=${process.env.INSTAGRAM_SESSION_ID};`,
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-origin',
-        'Pragma': 'no-cache',
-        'Cache-Control': 'no-cache'
+        'Referer': `https://www.instagram.com/${username}/`
       },
-      maxRedirects: 5,
+      timeout: 30000,
       validateStatus: function (status) {
-        return status >= 200 && status < 500; // Accept all status codes less than 500
-      },
-      timeout: 10000 // 10 second timeout
+        return status >= 200 && status < 500;
+      }
     });
 
     if (!userResponse.data || !userResponse.data.data || !userResponse.data.data.user) {
@@ -115,7 +107,17 @@ async function scrapeInstagramProfile(username) {
       website: userData.external_url,
       createdAt: new Date(userData.edge_owner_to_timeline_media.edges[0]?.node?.taken_at_timestamp * 1000).toISOString(),
       lastPostTimestamp: userData.edge_owner_to_timeline_media.edges[0]?.node?.taken_at_timestamp,
-      lastPostShortcode: userData.edge_owner_to_timeline_media.edges[0]?.node?.shortcode
+      lastPostShortcode: userData.edge_owner_to_timeline_media.edges[0]?.node?.shortcode,
+      recentPosts: userData.edge_owner_to_timeline_media.edges.slice(0, 12).map(edge => ({
+        id: edge.node.id,
+        shortcode: edge.node.shortcode,
+        takenAt: new Date(edge.node.taken_at_timestamp * 1000).toISOString(),
+        displayUrl: edge.node.display_url,
+        isVideo: edge.node.is_video,
+        videoUrl: edge.node.video_url,
+        likesCount: edge.node.edge_liked_by.count,
+        commentsCount: edge.node.edge_media_to_comment.count
+      }))
     };
 
     return profileData;
@@ -151,6 +153,7 @@ app.post('/scrape', async (req, res) => {
     // Validate request body
     if (!username) {
       return res.status(400).json({ 
+        success: false,
         error: 'Username is required',
         details: 'Please provide a username in the request body'
       });
@@ -159,6 +162,7 @@ app.post('/scrape', async (req, res) => {
     // Validate username format
     if (!isValidUsername(username)) {
       return res.status(400).json({ 
+        success: false,
         error: 'Invalid username format',
         details: 'Username can only contain letters, numbers, dots, and underscores'
       });
@@ -188,7 +192,10 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`Server running on port ${port}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
+
+// Set server timeout
+server.timeout = 30000; // 30 seconds
