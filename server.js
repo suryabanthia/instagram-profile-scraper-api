@@ -1,7 +1,19 @@
 const express = require('express');
 const axios = require('axios');
+const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const app = express();
 const port = process.env.PORT || 3000;
+
+// Enable CORS for all routes
+app.use(cors());
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100 // limit each IP to 100 requests per windowMs
+});
+app.use(limiter);
 
 app.use(express.json());
 
@@ -14,6 +26,11 @@ const USER_PROFILE_QUERY_ID = 'c9100bf9110d5eac54a2246af9098ec6';
 // Instagram session cookie from environment variable
 if (!process.env.INSTAGRAM_SESSION_ID) {
   throw new Error('INSTAGRAM_SESSION_ID environment variable is required');
+}
+
+// Validate username format
+function isValidUsername(username) {
+  return /^[a-zA-Z0-9._]{1,30}$/.test(username);
 }
 
 async function scrapeInstagramProfile(username) {
@@ -37,8 +54,18 @@ async function scrapeInstagramProfile(username) {
         'Origin': 'https://www.instagram.com',
         'Referer': `https://www.instagram.com/${username}/`,
         'Connection': 'keep-alive',
-        'Cookie': `sessionid=${process.env.INSTAGRAM_SESSION_ID};`
-      }
+        'Cookie': `sessionid=${process.env.INSTAGRAM_SESSION_ID};`,
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'Pragma': 'no-cache',
+        'Cache-Control': 'no-cache'
+      },
+      maxRedirects: 5,
+      validateStatus: function (status) {
+        return status >= 200 && status < 500; // Accept all status codes less than 500
+      },
+      timeout: 10000 // 10 second timeout
     });
 
     if (!userResponse.data || !userResponse.data.data || !userResponse.data.data.user) {
@@ -101,22 +128,67 @@ async function scrapeInstagramProfile(username) {
         throw new Error('Rate limit exceeded. Please try again later.');
       } else if (error.response.status === 401) {
         throw new Error('Authentication required. Please check your session ID.');
+      } else if (error.response.status === 403) {
+        throw new Error('Access forbidden. The request was blocked.');
       }
+    }
+    if (error.code === 'ECONNABORTED') {
+      throw new Error('Request timeout. Please try again.');
     }
     throw new Error(`Failed to scrape Instagram profile: ${error.message}`);
   }
 }
 
-app.post('/scrape', async (req, res) => {
-  const { username } = req.body;
-  if (!username) return res.status(400).json({ error: 'Username required' });
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
 
+app.post('/scrape', async (req, res) => {
   try {
+    const { username } = req.body;
+    
+    // Validate request body
+    if (!username) {
+      return res.status(400).json({ 
+        error: 'Username is required',
+        details: 'Please provide a username in the request body'
+      });
+    }
+
+    // Validate username format
+    if (!isValidUsername(username)) {
+      return res.status(400).json({ 
+        error: 'Invalid username format',
+        details: 'Username can only contain letters, numbers, dots, and underscores'
+      });
+    }
+
     const data = await scrapeInstagramProfile(username);
-    res.json(data);
+    res.json({
+      success: true,
+      data: data
+    });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('API error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message
+    });
   }
 });
 
-app.listen(port, () => console.log(`Server running on port ${port}`));
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({
+    success: false,
+    error: 'Internal server error',
+    details: process.env.NODE_ENV === 'development' ? err.message : undefined
+  });
+});
+
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+});
