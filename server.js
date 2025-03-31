@@ -45,6 +45,23 @@ function isValidUsername(username) {
   return /^[a-zA-Z0-9._]{1,30}$/.test(username);
 }
 
+// Helper function to safely convert timestamp to ISO string
+function safeTimestampToISO(timestamp) {
+  if (!timestamp || isNaN(timestamp)) return null;
+  try {
+    // Ensure timestamp is a number and in milliseconds
+    const msTimestamp = typeof timestamp === 'string' ? parseInt(timestamp) : timestamp;
+    if (msTimestamp < 1000000000000) { // If timestamp is in seconds
+      return new Date(msTimestamp * 1000).toISOString();
+    } else { // If timestamp is already in milliseconds
+      return new Date(msTimestamp).toISOString();
+    }
+  } catch (error) {
+    console.error('Timestamp conversion error:', error);
+    return null;
+  }
+}
+
 async function scrapeInstagramProfile(username) {
   try {
     // Get user profile data using Instagram's API
@@ -65,58 +82,59 @@ async function scrapeInstagramProfile(username) {
     }
 
     const userData = userResponse.data.data.user;
+    const firstPost = userData.edge_owner_to_timeline_media?.edges?.[0]?.node;
 
     // Extract the data
     const profileData = {
       username: userData.username,
       fullName: userData.full_name,
-      followersCount: userData.edge_followed_by.count,
-      followingCount: userData.edge_follow.count,
-      bio: userData.biography,
-      externalUrl: userData.external_url,
-      isBusinessAccount: userData.is_business_account,
-      isPrivate: userData.is_private,
-      profilePicture: userData.profile_pic_url_hd || userData.profile_pic_url,
-      postsCount: userData.edge_owner_to_timeline_media.count,
-      isVerified: userData.is_verified,
-      businessCategory: userData.business_category_name,
-      businessEmail: userData.business_email,
-      businessPhone: userData.business_phone_number,
-      businessAddress: userData.business_address_json,
-      connectedFacebookPage: userData.connected_facebook_page,
-      countryBlock: userData.country_block,
-      hasArEffects: userData.has_ar_effects,
-      hasClips: userData.has_clips,
-      hasGuides: userData.has_guides,
-      hasChannel: userData.has_channel,
-      hasBlockedViewer: userData.has_blocked_viewer,
-      highlightReelCount: userData.highlight_reel_count,
-      isJoinedRecently: userData.is_joined_recently,
-      businessContactMethod: userData.business_contact_method,
-      category: userData.category,
-      categoryName: userData.category_name,
-      mutualFollowersCount: userData.edge_mutual_followed_by.count,
-      pronouns: userData.pronouns,
-      restrictedByViewer: userData.restricted_by_viewer,
-      shouldShowCategory: userData.should_show_category,
-      shouldShowPublicContacts: userData.should_show_public_contacts,
-      showAccountTransparencyDetails: userData.show_account_transparency_details,
-      transparencyProduct: userData.transparency_product,
-      transparencyProductEnabled: userData.transparency_product_enabled,
-      userID: userData.id,
-      website: userData.external_url,
-      createdAt: new Date(userData.edge_owner_to_timeline_media.edges[0]?.node?.taken_at_timestamp * 1000).toISOString(),
-      lastPostTimestamp: userData.edge_owner_to_timeline_media.edges[0]?.node?.taken_at_timestamp,
-      lastPostShortcode: userData.edge_owner_to_timeline_media.edges[0]?.node?.shortcode,
-      recentPosts: userData.edge_owner_to_timeline_media.edges.slice(0, 12).map(edge => ({
-        id: edge.node.id,
-        shortcode: edge.node.shortcode,
-        takenAt: new Date(edge.node.taken_at_timestamp * 1000).toISOString(),
-        displayUrl: edge.node.display_url,
-        isVideo: edge.node.is_video,
-        videoUrl: edge.node.video_url,
-        likesCount: edge.node.edge_liked_by.count,
-        commentsCount: edge.node.edge_media_to_comment.count
+      followersCount: userData.edge_followed_by?.count || 0,
+      followingCount: userData.edge_follow?.count || 0,
+      bio: userData.biography || '',
+      externalUrl: userData.external_url || '',
+      isBusinessAccount: userData.is_business_account || false,
+      isPrivate: userData.is_private || false,
+      profilePicture: userData.profile_pic_url_hd || userData.profile_pic_url || '',
+      postsCount: userData.edge_owner_to_timeline_media?.count || 0,
+      isVerified: userData.is_verified || false,
+      businessCategory: userData.business_category_name || '',
+      businessEmail: userData.business_email || '',
+      businessPhone: userData.business_phone_number || '',
+      businessAddress: userData.business_address_json || null,
+      connectedFacebookPage: userData.connected_facebook_page || null,
+      countryBlock: userData.country_block || false,
+      hasArEffects: userData.has_ar_effects || false,
+      hasClips: userData.has_clips || false,
+      hasGuides: userData.has_guides || false,
+      hasChannel: userData.has_channel || false,
+      hasBlockedViewer: userData.has_blocked_viewer || false,
+      highlightReelCount: userData.highlight_reel_count || 0,
+      isJoinedRecently: userData.is_joined_recently || false,
+      businessContactMethod: userData.business_contact_method || '',
+      category: userData.category || '',
+      categoryName: userData.category_name || '',
+      mutualFollowersCount: userData.edge_mutual_followed_by?.count || 0,
+      pronouns: userData.pronouns || '',
+      restrictedByViewer: userData.restricted_by_viewer || false,
+      shouldShowCategory: userData.should_show_category || false,
+      shouldShowPublicContacts: userData.should_show_public_contacts || false,
+      showAccountTransparencyDetails: userData.show_account_transparency_details || false,
+      transparencyProduct: userData.transparency_product || '',
+      transparencyProductEnabled: userData.transparency_product_enabled || false,
+      userID: userData.id || '',
+      website: userData.external_url || '',
+      createdAt: firstPost ? safeTimestampToISO(firstPost.taken_at_timestamp) : null,
+      lastPostTimestamp: firstPost?.taken_at_timestamp || null,
+      lastPostShortcode: firstPost?.shortcode || null,
+      recentPosts: (userData.edge_owner_to_timeline_media?.edges || []).slice(0, 12).map(edge => ({
+        id: edge.node.id || '',
+        shortcode: edge.node.shortcode || '',
+        takenAt: safeTimestampToISO(edge.node.taken_at_timestamp),
+        displayUrl: edge.node.display_url || '',
+        isVideo: edge.node.is_video || false,
+        videoUrl: edge.node.video_url || '',
+        likesCount: edge.node.edge_liked_by?.count || 0,
+        commentsCount: edge.node.edge_media_to_comment?.count || 0
       }))
     };
 
